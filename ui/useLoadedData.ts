@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import { collectLoads, dataKey, type DataRequest, type LoadedData, type Program } from "../core";
 import type { rpcContract } from "../server";
-import { liveLoad } from "./liveLoad";
+import { liveLoad, unknownEvidence } from "./liveLoad";
 import type { ImageUrl, TextFile } from "./runtime";
 
 /** Where a spec's files come from: a thread's workspace and storage, or the gallery. */
@@ -61,8 +61,17 @@ function remember(key: string, loaded: LoadedData): void {
   if (LOADED.size > MAX_LOADED) LOADED.delete(LOADED.keys().next().value!);
 }
 
-/** The spec's files keyed by `dataKey`; a request still in flight has no entry. While `visible`, Load files are re-read live. */
-export function useLoadedData(scope: FileScope, program: Program | null, visible = false): ReadonlyMap<string, LoadedData> {
+/**
+ * The spec's files keyed by `dataKey`; a request still in flight has no entry.
+ * While `visible`, Load files are re-read live; a card's `evidence` list, when
+ * given, refuses any other Load path with card.evidence_unknown.
+ */
+export function useLoadedData(
+  scope: FileScope,
+  program: Program | null,
+  visible = false,
+  evidence?: readonly string[],
+): ReadonlyMap<string, LoadedData> {
   const loaders = useLoaders(scope);
   const scopeKey = scope === "gallery" ? "gallery" : scope.threadId;
   // Streaming recompiles the program often; refetch only when the requests change.
@@ -76,9 +85,19 @@ export function useLoadedData(scope: FileScope, program: Program | null, visible
     return found;
   });
 
+  const evidenceKey = evidence === undefined ? null : JSON.stringify(evidence);
   useEffect(() => {
     const requests = JSON.parse(requestsKey) as DataRequest[];
-    const missing = requests.filter((request) => !data.has(dataKey(request)));
+    const allowed = evidenceKey === null ? null : (JSON.parse(evidenceKey) as string[]);
+    // A card's Load of a file outside its evidence is refused, never read (a cached read is not shown either).
+    const unknown = requests.filter((request) => allowed !== null && !request.raw && !allowed.includes(request.path));
+    if (unknown.length > 0)
+      setData((previous) => {
+        const next = new Map(previous);
+        for (const request of unknown) next.set(dataKey(request), unknownEvidence(request.path));
+        return next;
+      });
+    const missing = requests.filter((request) => !data.has(dataKey(request)) && !unknown.includes(request));
     if (missing.length === 0) return;
     let live = true;
     for (const request of missing) {
@@ -99,13 +118,14 @@ export function useLoadedData(scope: FileScope, program: Program | null, visible
     };
     // `data` is read only to skip requests already loaded; re-running on each
     // arrival would refetch the requests still in flight.
-  }, [loaders, requestsKey, scopeKey]);
+  }, [loaders, requestsKey, scopeKey, evidenceKey]);
 
   useEffect(() => {
     if (!visible) return;
     const paths = (JSON.parse(requestsKey) as DataRequest[]).filter((request) => !request.raw).map((request) => request.path);
     const live = liveLoad({
       paths,
+      evidence: evidenceKey === null ? undefined : (JSON.parse(evidenceKey) as string[]),
       read: (path) => loaders.data(path, false),
       onData(path, loaded) {
         const key = dataKey({ path, raw: false });
@@ -120,7 +140,7 @@ export function useLoadedData(scope: FileScope, program: Program | null, visible
     });
     live.setVisible(true);
     return () => live.stop();
-  }, [visible, loaders, requestsKey, scopeKey]);
+  }, [visible, loaders, requestsKey, scopeKey, evidenceKey]);
 
   return data;
 }

@@ -72,6 +72,7 @@ export const Fence = memo(function Fence({
   threadId,
   messageId,
   actions,
+  evidence,
 }: {
   language: FenceLanguage;
   code: string;
@@ -82,6 +83,8 @@ export const Fence = memo(function Fence({
   /** The assistant message holding the block: BB's message id, which is also its timeline row id. */
   messageId: string;
   actions: ThreadActions;
+  /** A card's evidence files: its live Load refuses any other path. */
+  evidence?: readonly string[];
 }) {
   return language === "app" ? (
     <AppBlock html={code} ready={complete} />
@@ -93,6 +96,7 @@ export const Fence = memo(function Fence({
       threadId={threadId}
       messageId={messageId}
       actions={actions}
+      evidence={evidence}
     />
   );
 });
@@ -104,6 +108,7 @@ function UiFence({
   threadId,
   messageId,
   actions,
+  evidence,
 }: {
   code: string;
   complete: boolean;
@@ -111,6 +116,7 @@ function UiFence({
   threadId: string;
   messageId: string;
   actions: ThreadActions;
+  evidence?: readonly string[];
 }) {
   const result = useMemo(() => compileStreaming(code), [code]);
   // While the reply streams, an unparseable prefix keeps the last good render.
@@ -118,7 +124,7 @@ function UiFence({
   if (result.program !== null) lastGood.current = result;
   const shown = lastGood.current;
   const [ref, visible] = useVisible<HTMLDivElement>();
-  const data = useLoadedData({ threadId }, shown?.program ?? null, visible);
+  const data = useLoadedData({ threadId }, shown?.program ?? null, visible, evidence);
   const loadImage = useImageLoader({ threadId });
   const readText = useTextLoader({ threadId });
   const loadAudio = useAudioLoader({ threadId });

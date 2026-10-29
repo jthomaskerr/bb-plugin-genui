@@ -18,11 +18,16 @@ const REAL_CLOCK: LiveClock = {
 export interface LiveLoadOptions {
   readonly paths: readonly string[];
   readonly read: (path: string) => Promise<LoadedData>;
-  /** Called with a path's new result; an unchanged re-read is not reported. */
+  /** Called with each re-read's result; the caller drops unchanged ones. */
   readonly onData: (path: string, loaded: LoadedData) => void;
   /** The card's evidence files; when given, any other path is refused and never read. */
   readonly evidence?: readonly string[];
   readonly clock?: LiveClock;
+}
+
+/** The refusal for a Load of a file that is not one of the card's evidence. */
+export function unknownEvidence(path: string): LoadedData {
+  return { ok: false, error: `card.evidence_unknown: ${path} is not one of the card's evidence files` };
 }
 
 export function liveLoad({ paths, read, onData, evidence, clock = REAL_CLOCK }: LiveLoadOptions): {
@@ -31,8 +36,7 @@ export function liveLoad({ paths, read, onData, evidence, clock = REAL_CLOCK }: 
 } {
   const known = evidence === undefined ? paths : paths.filter((path) => evidence.includes(path));
   for (const path of paths)
-    if (!known.includes(path)) onData(path, { ok: false, error: `card.evidence_unknown: ${path} is not one of the card's evidence files` });
-  const last = new Map<string, string>();
+    if (!known.includes(path)) onData(path, unknownEvidence(path));
   let timer: unknown = null;
   let visible = false;
   let stopped = false;
@@ -48,10 +52,7 @@ export function liveLoad({ paths, read, onData, evidence, clock = REAL_CLOCK }: 
       known.map((path) =>
         read(path).then(
           (loaded) => {
-            const signature = JSON.stringify(loaded);
-            if (stopped || last.get(path) === signature) return;
-            last.set(path, signature);
-            onData(path, loaded);
+            if (!stopped) onData(path, loaded);
           },
           // A failed re-read keeps what is shown; the next tick tries again.
           () => undefined,
