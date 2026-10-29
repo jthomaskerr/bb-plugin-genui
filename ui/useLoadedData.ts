@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import { collectLoads, dataKey, type DataRequest, type LoadedData, type Program } from "../core";
 import type { rpcContract } from "../server";
+import { liveLoad } from "./liveLoad";
 import type { ImageUrl, TextFile } from "./runtime";
 
 /** Where a spec's files come from: a thread's workspace and storage, or the gallery. */
@@ -60,8 +61,8 @@ function remember(key: string, loaded: LoadedData): void {
   if (LOADED.size > MAX_LOADED) LOADED.delete(LOADED.keys().next().value!);
 }
 
-/** The spec's files keyed by `dataKey`; a request still in flight has no entry. */
-export function useLoadedData(scope: FileScope, program: Program | null): ReadonlyMap<string, LoadedData> {
+/** The spec's files keyed by `dataKey`; a request still in flight has no entry. While `visible`, Load files are re-read live. */
+export function useLoadedData(scope: FileScope, program: Program | null, visible = false): ReadonlyMap<string, LoadedData> {
   const loaders = useLoaders(scope);
   const scopeKey = scope === "gallery" ? "gallery" : scope.threadId;
   // Streaming recompiles the program often; refetch only when the requests change.
@@ -99,6 +100,27 @@ export function useLoadedData(scope: FileScope, program: Program | null): Readon
     // `data` is read only to skip requests already loaded; re-running on each
     // arrival would refetch the requests still in flight.
   }, [loaders, requestsKey, scopeKey]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const paths = (JSON.parse(requestsKey) as DataRequest[]).filter((request) => !request.raw).map((request) => request.path);
+    const live = liveLoad({
+      paths,
+      read: (path) => loaders.data(path, false),
+      onData(path, loaded) {
+        const key = dataKey({ path, raw: false });
+        remember(`${scopeKey}|${key}`, loaded);
+        setData((previous) => {
+          const shown = previous.get(key);
+          // A file caught mid-write fails to parse: keep the good read until the next tick.
+          if (!loaded.ok && shown?.ok === true) return previous;
+          return JSON.stringify(shown) === JSON.stringify(loaded) ? previous : new Map(previous).set(key, loaded);
+        });
+      },
+    });
+    live.setVisible(true);
+    return () => live.stop();
+  }, [visible, loaders, requestsKey, scopeKey]);
 
   return data;
 }

@@ -7,6 +7,7 @@ import { compileStreaming } from "../core";
 import { AppBlock } from "./AppBlock";
 import { LiveUi, RenderFailure, sendThroughComposer } from "./LiveUi";
 import { useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
+import { useVisible } from "./components/projectKit";
 import { useSuperseded } from "./useSuperseded";
 
 export type FenceLanguage = "ui" | "app";
@@ -116,7 +117,8 @@ function UiFence({
   const lastGood = useRef(result.program === null ? null : result);
   if (result.program !== null) lastGood.current = result;
   const shown = lastGood.current;
-  const data = useLoadedData({ threadId }, shown?.program ?? null);
+  const [ref, visible] = useVisible<HTMLDivElement>();
+  const data = useLoadedData({ threadId }, shown?.program ?? null, visible);
   const loadImage = useImageLoader({ threadId });
   const readText = useTextLoader({ threadId });
   const loadAudio = useAudioLoader({ threadId });
@@ -124,32 +126,36 @@ function UiFence({
   const openFile = useCallback((path: string, line?: number) => actions.openFile(threadId, path, line), [actions, threadId]);
   const superseded = useSuperseded(threadId, messageId);
 
-  if (shown?.program == null) {
-    return complete ? (
-      <RenderFailure source={code} diagnostics={result.diagnostics} />
-    ) : (
-      <div
-        role="status"
-        aria-label="Building UI"
-        className="not-prose my-3 h-20 animate-pulse rounded-xl border border-border bg-surface-recessed"
-      />
-    );
-  }
+  // Always rendered, so useVisible observes it from the first mount.
   return (
-    <LiveUi
-      program={shown.program}
-      compileDiagnostics={complete && !result.complete ? result.diagnostics : shown.diagnostics}
-      source={code}
-      stateKey={stateKey}
-      data={data}
-      send={send}
-      openFile={openFile}
-      loadImage={loadImage}
-      readText={readText}
-      loadAudio={loadAudio}
-      superseded={superseded}
-      threadId={threadId}
-      blockKey={stateKey}
-    />
+    <div ref={ref}>
+      {shown?.program == null ? (
+        complete ? (
+          <RenderFailure source={code} diagnostics={result.diagnostics} />
+        ) : (
+          <div
+            role="status"
+            aria-label="Building UI"
+            className="not-prose my-3 h-20 animate-pulse rounded-xl border border-border bg-surface-recessed"
+          />
+        )
+      ) : (
+        <LiveUi
+          program={shown.program}
+          compileDiagnostics={complete && !result.complete ? result.diagnostics : shown.diagnostics}
+          source={code}
+          stateKey={stateKey}
+          data={data}
+          send={send}
+          openFile={openFile}
+          loadImage={loadImage}
+          readText={readText}
+          loadAudio={loadAudio}
+          superseded={superseded}
+          threadId={threadId}
+          blockKey={stateKey}
+        />
+      )}
+    </div>
   );
 }
