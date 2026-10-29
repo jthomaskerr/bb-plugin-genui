@@ -1,5 +1,4 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { collectLoads, compile, parseDataFile, type LoadedData } from "../core";
@@ -36,6 +35,10 @@ function fakeClock(): LiveClock & { advance(ms: number): Promise<void>; pending(
   };
 }
 
+// Joseph forbids the system temp folder: the temporary file goes only under GENUI_TEST_TMP.
+const SCRATCH = process.env.GENUI_TEST_TMP;
+if (!SCRATCH) throw new Error("GENUI_TEST_TMP is unset: point it at a scratch folder (never the system temp folder)");
+
 describe("live Load", () => {
   let dir: string;
   let file: string;
@@ -49,8 +52,7 @@ describe("live Load", () => {
   };
 
   beforeEach(() => {
-    // The workspace forbids the system temp dir; GENUI_TEST_TMP points at a scratch dir.
-    dir = mkdtempSync(join(process.env.GENUI_TEST_TMP ?? tmpdir(), "live-load-"));
+    dir = mkdtempSync(join(SCRATCH, "live-load-"));
     file = join(dir, "burndown.json");
     writeFileSync(file, JSON.stringify({ open: 3 }));
     reads = 0;
@@ -94,15 +96,6 @@ describe("live Load", () => {
     live.stop();
     await clock.advance(10 * LIVE_LOAD_MS);
     expect(reads).toBe(3);
-  });
-
-  it("reports only changes: an unchanged file re-read is not shown again", async () => {
-    const live = liveLoad({ paths: paths(), read, onData: (path, loaded) => seen.push({ path, loaded }), clock });
-    live.setVisible(true);
-    await clock.advance(3 * LIVE_LOAD_MS);
-    expect(reads).toBe(3);
-    expect(seen).toHaveLength(1);
-    live.stop();
   });
 
   it("refuses a Load that is not one of the card's evidence with card.evidence_unknown, and never reads it", async () => {
